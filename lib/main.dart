@@ -1,122 +1,278 @@
+import 'dart:math';
+import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const TapTideApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class TapTideApp extends StatelessWidget {
+  const TapTideApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Tap Tide',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF0077B6),
+          brightness: Brightness.light,
+        ),
+        textTheme: GoogleFonts.poppinsTextTheme(),
+        scaffoldBackgroundColor: const Color(0xFFF8F9FA),
       ),
-      home: const MyHomePage(title: 'Tap Tide Prototype'),
+      home: const TapTideHomePage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class TapTideHomePage extends StatefulWidget {
+  const TapTideHomePage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<TapTideHomePage> createState() => _TapTideHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _TapTideHomePageState extends State<TapTideHomePage> {
+  late List<int> numbers;
+  int nextExpected = 1;
+  int score = 0;
+  bool gameOver = false;
+  String statusMessage = 'Tap 1 to begin';
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _startNewGame();
+  }
+
+  void _startNewGame() {
+    numbers = List.generate(9, (index) => index + 1);
+    numbers.shuffle(Random());
+    nextExpected = 1;
+    score = 0;
+    gameOver = false;
+    statusMessage = 'Tap 1 to begin';
+    setState(() {});
+  }
+
+  void _handleTap(int value) {
+    if (gameOver) return;
+
+    if (value == nextExpected) {
+      if (nextExpected == 9) {
+        setState(() {
+          score += 10;
+          statusMessage = 'You cleared the board!';
+          gameOver = true;
+        });
+      } else {
+        setState(() {
+          score += 1;
+          nextExpected++;
+          statusMessage = 'Good! Tap $nextExpected';
+        });
+      }
+    } else {
+      setState(() {
+        statusMessage = 'Wrong tile. Game over.';
+        gameOver = true;
+      });
+    }
+  }
+
+  Color _tileColor(int value) {
+    if (gameOver && value == nextExpected) {
+      return const Color(0xFFFF6B35);
+    }
+    if (value < nextExpected) {
+      return const Color(0xFF2DC653);
+    }
+    return const Color(0xFF0077B6);
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: const Text('Tap Tide'),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF0077B6),
+        foregroundColor: Colors.white,
+        elevation: 0,
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              _TopPanel(
+                score: score,
+                nextExpected: nextExpected,
+                gameOver: gameOver,
+                statusMessage: statusMessage,
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: GridView.builder(
+                  itemCount: numbers.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                  ),
+                  itemBuilder: (context, index) {
+                    final value = numbers[index];
+                    return GestureDetector(
+                      onTap: () => _handleTap(value),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        decoration: BoxDecoration(
+                          color: _tileColor(value),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black12,
+                              blurRadius: 8,
+                              offset: Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            '$value',
+                            style: const TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _startNewGame,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD60A),
+                    foregroundColor: const Color(0xFF1B263B),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: const Text(
+                    'Restart Game',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+    );
+  }
+}
+
+class _TopPanel extends StatelessWidget {
+  final int score;
+  final int nextExpected;
+  final bool gameOver;
+  final String statusMessage;
+
+  const _TopPanel({
+    required this.score,
+    required this.nextExpected,
+    required this.gameOver,
+    required this.statusMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _InfoChip(label: 'Score', value: '$score'),
+              _InfoChip(
+                label: 'Next',
+                value: gameOver ? '-' : '$nextExpected',
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            statusMessage,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1B263B),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoChip({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Colors.black54,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF0077B6),
+          ),
+        ),
+      ],
     );
   }
 }
