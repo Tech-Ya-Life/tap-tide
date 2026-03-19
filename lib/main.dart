@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -72,16 +73,59 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
 
   Timer? _timer;
 
+  late final AudioPool _tapCorrectPool;
+  late final AudioPool _countdownTickPool;
+  late final AudioPlayer _comboPlayer;
+  late final AudioPlayer _waveCompletePlayer;
+  late final AudioPlayer _failPlayer;
+  late final AudioPlayer _goPlayer;
+
   @override
   void initState() {
     super.initState();
     numbers = List.generate(boardSize, (index) => index + 1)..shuffle(_random);
     _loadPreferences();
+    _initAudio();
+  }
+
+  Future<void> _initAudio() async {
+    _tapCorrectPool = await AudioPool.create(
+      source: AssetSource('audio/sfx/tap_correct.wav'),
+      maxPlayers: 4,
+      playerMode: PlayerMode.lowLatency,
+    );
+
+    _countdownTickPool = await AudioPool.create(
+      source: AssetSource('audio/sfx/countdown_tick.wav'),
+      maxPlayers: 2,
+      playerMode: PlayerMode.lowLatency,
+    );
+
+    _comboPlayer = AudioPlayer(playerId: 'combo_player');
+    _waveCompletePlayer = AudioPlayer(playerId: 'wave_complete_player');
+    _failPlayer = AudioPlayer(playerId: 'fail_player');
+    _goPlayer = AudioPlayer(playerId: 'go_player');
+
+    await _comboPlayer.setReleaseMode(ReleaseMode.stop);
+    await _waveCompletePlayer.setReleaseMode(ReleaseMode.stop);
+    await _failPlayer.setReleaseMode(ReleaseMode.stop);
+    await _goPlayer.setReleaseMode(ReleaseMode.stop);
+
+    await _comboPlayer.setVolume(0.85);
+    await _waveCompletePlayer.setVolume(0.95);
+    await _failPlayer.setVolume(0.75);
+    await _goPlayer.setVolume(0.95);
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _tapCorrectPool.dispose();
+    _countdownTickPool.dispose();
+    _comboPlayer.dispose();
+    _waveCompletePlayer.dispose();
+    _failPlayer.dispose();
+    _goPlayer.dispose();
     super.dispose();
   }
 
@@ -120,37 +164,66 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     }
   }
 
+  Future<void> _playTapCorrectSound() async {
+    if (!soundEnabled) return;
+    await _tapCorrectPool.start(volume: 0.72);
+  }
+
+  Future<void> _playCountdownTickSound() async {
+    if (!soundEnabled) return;
+    await _countdownTickPool.start(volume: 0.78);
+  }
+
+  Future<void> _playComboSound() async {
+    if (!soundEnabled) return;
+    await _comboPlayer.stop();
+    await _comboPlayer.play(AssetSource('audio/sfx/combo.wav'), volume: 0.88);
+  }
+
+  Future<void> _playWaveCompleteSound() async {
+    if (!soundEnabled) return;
+    await _waveCompletePlayer.stop();
+    await _waveCompletePlayer.play(
+      AssetSource('audio/sfx/wave_complete.wav'),
+      volume: 0.95,
+    );
+  }
+
+  Future<void> _playFailSound() async {
+    if (!soundEnabled) return;
+    await _failPlayer.stop();
+    await _failPlayer.play(AssetSource('audio/sfx/fail.wav'), volume: 0.80);
+  }
+
+  Future<void> _playGoSound() async {
+    if (!soundEnabled) return;
+    await _goPlayer.stop();
+    await _goPlayer.play(AssetSource('audio/sfx/go.wav'), volume: 0.95);
+  }
+
   Future<void> _playCorrectFeedback() async {
-    if (soundEnabled) {
-      await SystemSound.play(SystemSoundType.click);
-    }
+    await _playTapCorrectSound();
     if (hapticsEnabled) {
       await HapticFeedback.selectionClick();
     }
   }
 
   Future<void> _playComboFeedback() async {
-    if (soundEnabled) {
-      await SystemSound.play(SystemSoundType.click);
-    }
+    await _playComboSound();
     if (hapticsEnabled) {
       await HapticFeedback.lightImpact();
     }
   }
 
   Future<void> _playWaveCompleteFeedback() async {
-    if (soundEnabled) {
-      await SystemSound.play(SystemSoundType.alert);
-    }
+    await _playWaveCompleteSound();
     if (hapticsEnabled) {
       await HapticFeedback.mediumImpact();
     }
   }
 
   Future<void> _playGameOverFeedback() async {
-    if (soundEnabled) {
-      await SystemSound.play(SystemSoundType.alert);
-    }
+    await _playFailSound();
     if (hapticsEnabled) {
       await HapticFeedback.heavyImpact();
     }
@@ -180,6 +253,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
       setState(() {
         countdownValue = i;
       });
+      await _playCountdownTickSound();
       await Future.delayed(const Duration(seconds: 1));
     }
 
@@ -201,6 +275,8 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
         textColor: Color(0xFF123524),
       ),
     );
+
+    await _playGoSound();
 
     if (hapticsEnabled) {
       await HapticFeedback.mediumImpact();
@@ -550,7 +626,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                         'Sound Effects',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      subtitle: const Text('System tap and alert sounds'),
+                      subtitle: const Text('Custom Tap Tide audio'),
                       value: soundEnabled,
                       onChanged: updateSound,
                     ),
