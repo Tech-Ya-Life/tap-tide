@@ -67,18 +67,22 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   bool gameStarted = false;
   bool isCountingDown = false;
 
+  bool _isTransitioning = false;
+  int _sessionToken = 0;
+
   String statusMessage = 'Tap start to begin';
   FeedbackBubble? feedbackBubble;
   int? countdownValue;
 
   Timer? _timer;
+  bool _audioReady = false;
 
-  late final AudioPool _tapCorrectPool;
-  late final AudioPool _countdownTickPool;
-  late final AudioPlayer _comboPlayer;
-  late final AudioPlayer _waveCompletePlayer;
-  late final AudioPlayer _failPlayer;
-  late final AudioPlayer _goPlayer;
+  AudioPool? _tapCorrectPool;
+  AudioPool? _countdownTickPool;
+  AudioPlayer? _comboPlayer;
+  AudioPlayer? _waveCompletePlayer;
+  AudioPlayer? _failPlayer;
+  AudioPlayer? _goPlayer;
 
   @override
   void initState() {
@@ -88,49 +92,57 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     _initAudio();
   }
 
-  Future<void> _initAudio() async {
-    _tapCorrectPool = await AudioPool.create(
-      source: AssetSource('audio/sfx/tap_correct.wav'),
-      maxPlayers: 4,
-      playerMode: PlayerMode.lowLatency,
-    );
-
-    _countdownTickPool = await AudioPool.create(
-      source: AssetSource('audio/sfx/countdown_tick.wav'),
-      maxPlayers: 2,
-      playerMode: PlayerMode.lowLatency,
-    );
-
-    _comboPlayer = AudioPlayer(playerId: 'combo_player');
-    _waveCompletePlayer = AudioPlayer(playerId: 'wave_complete_player');
-    _failPlayer = AudioPlayer(playerId: 'fail_player');
-    _goPlayer = AudioPlayer(playerId: 'go_player');
-
-    await _comboPlayer.setReleaseMode(ReleaseMode.stop);
-    await _waveCompletePlayer.setReleaseMode(ReleaseMode.stop);
-    await _failPlayer.setReleaseMode(ReleaseMode.stop);
-    await _goPlayer.setReleaseMode(ReleaseMode.stop);
-
-    await _comboPlayer.setVolume(0.85);
-    await _waveCompletePlayer.setVolume(0.95);
-    await _failPlayer.setVolume(0.75);
-    await _goPlayer.setVolume(0.95);
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
-    _tapCorrectPool.dispose();
-    _countdownTickPool.dispose();
-    _comboPlayer.dispose();
-    _waveCompletePlayer.dispose();
-    _failPlayer.dispose();
-    _goPlayer.dispose();
+    _tapCorrectPool?.dispose();
+    _countdownTickPool?.dispose();
+    _comboPlayer?.dispose();
+    _waveCompletePlayer?.dispose();
+    _failPlayer?.dispose();
+    _goPlayer?.dispose();
     super.dispose();
+  }
+
+  Future<void> _initAudio() async {
+    try {
+      _tapCorrectPool = await AudioPool.create(
+        source: AssetSource('audio/sfx/tap_correct.wav'),
+        maxPlayers: 4,
+        playerMode: PlayerMode.lowLatency,
+      );
+
+      _countdownTickPool = await AudioPool.create(
+        source: AssetSource('audio/sfx/countdown_tick.wav'),
+        maxPlayers: 2,
+        playerMode: PlayerMode.lowLatency,
+      );
+
+      _comboPlayer = AudioPlayer(playerId: 'combo_player');
+      _waveCompletePlayer = AudioPlayer(playerId: 'wave_complete_player');
+      _failPlayer = AudioPlayer(playerId: 'fail_player');
+      _goPlayer = AudioPlayer(playerId: 'go_player');
+
+      await _comboPlayer!.setReleaseMode(ReleaseMode.stop);
+      await _waveCompletePlayer!.setReleaseMode(ReleaseMode.stop);
+      await _failPlayer!.setReleaseMode(ReleaseMode.stop);
+      await _goPlayer!.setReleaseMode(ReleaseMode.stop);
+
+      await _comboPlayer!.setVolume(0.85);
+      await _waveCompletePlayer!.setVolume(0.95);
+      await _failPlayer!.setVolume(0.80);
+      await _goPlayer!.setVolume(0.95);
+
+      _audioReady = true;
+    } catch (_) {
+      _audioReady = false;
+    }
   }
 
   Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+
     setState(() {
       highScore = prefs.getInt(highScoreKey) ?? 0;
       soundEnabled = prefs.getBool(soundEnabledKey) ?? true;
@@ -141,6 +153,8 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   Future<void> _setSoundEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(soundEnabledKey, value);
+    if (!mounted) return;
+
     setState(() {
       soundEnabled = value;
     });
@@ -149,56 +163,69 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   Future<void> _setHapticsEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(hapticsEnabledKey, value);
+    if (!mounted) return;
+
     setState(() {
       hapticsEnabled = value;
     });
   }
 
   Future<void> _saveHighScoreIfNeeded() async {
-    if (score > highScore) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(highScoreKey, score);
-      setState(() {
-        highScore = score;
-      });
-    }
+    if (score <= highScore) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(highScoreKey, score);
+
+    if (!mounted) return;
+    setState(() {
+      highScore = score;
+    });
   }
 
   Future<void> _playTapCorrectSound() async {
-    if (!soundEnabled) return;
-    await _tapCorrectPool.start(volume: 0.72);
+    if (!soundEnabled || !_audioReady || _tapCorrectPool == null) return;
+    await _tapCorrectPool!.start(volume: 0.72);
   }
 
   Future<void> _playCountdownTickSound() async {
-    if (!soundEnabled) return;
-    await _countdownTickPool.start(volume: 0.78);
+    if (!soundEnabled || !_audioReady || _countdownTickPool == null) return;
+    await _countdownTickPool!.start(volume: 0.78);
   }
 
   Future<void> _playComboSound() async {
-    if (!soundEnabled) return;
-    await _comboPlayer.stop();
-    await _comboPlayer.play(AssetSource('audio/sfx/combo.wav'), volume: 0.88);
+    if (!soundEnabled || !_audioReady || _comboPlayer == null) return;
+    await _comboPlayer!.stop();
+    await _comboPlayer!.play(
+      AssetSource('audio/sfx/combo.wav'),
+      volume: 0.88,
+    );
   }
 
   Future<void> _playWaveCompleteSound() async {
-    if (!soundEnabled) return;
-    await _waveCompletePlayer.stop();
-    await _waveCompletePlayer.play(
+    if (!soundEnabled || !_audioReady || _waveCompletePlayer == null) return;
+    await _waveCompletePlayer!.stop();
+    await _waveCompletePlayer!.play(
       AssetSource('audio/sfx/wave_complete.wav'),
       volume: 0.95,
     );
   }
 
   Future<void> _playFailSound() async {
-    if (!soundEnabled) return;
-    await _failPlayer.stop();
-    await _failPlayer.play(AssetSource('audio/sfx/fail.wav'), volume: 0.80);
+    if (!soundEnabled || !_audioReady || _failPlayer == null) return;
+    await _failPlayer!.stop();
+    await _failPlayer!.play(
+      AssetSource('audio/sfx/fail.wav'),
+      volume: 0.80,
+    );
   }
 
   Future<void> _playGoSound() async {
-    if (!soundEnabled) return;
-    await _goPlayer.stop();
-    await _goPlayer.play(AssetSource('audio/sfx/go.wav'), volume: 0.95);
+    if (!soundEnabled || !_audioReady || _goPlayer == null) return;
+    await _goPlayer!.stop();
+    await _goPlayer!.play(
+      AssetSource('audio/sfx/go.wav'),
+      volume: 0.95,
+    );
   }
 
   Future<void> _playCorrectFeedback() async {
@@ -230,7 +257,16 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   }
 
   Future<void> _beginCountdownAndStart() async {
+    if (_isTransitioning) return;
+
+    _isTransitioning = true;
+    final int myToken = ++_sessionToken;
     _timer?.cancel();
+
+    if (!mounted) {
+      _isTransitioning = false;
+      return;
+    }
 
     setState(() {
       numbers = List.generate(boardSize, (index) => index + 1)..shuffle(_random);
@@ -249,20 +285,29 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     });
 
     for (int i = 3; i >= 1; i--) {
-      if (!mounted) return;
+      if (!mounted || myToken != _sessionToken) {
+        _isTransitioning = false;
+        return;
+      }
+
       setState(() {
         countdownValue = i;
       });
+
       await _playCountdownTickSound();
       await Future.delayed(const Duration(seconds: 1));
     }
 
-    if (!mounted) return;
+    if (!mounted || myToken != _sessionToken) {
+      _isTransitioning = false;
+      return;
+    }
 
     setState(() {
       countdownValue = null;
       isCountingDown = false;
       gameStarted = true;
+      gameOver = false;
       statusMessage = 'Go! Tap 1';
     });
 
@@ -283,14 +328,20 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     }
 
     _startTimer();
+    _isTransitioning = false;
   }
 
   void _startTimer() {
     _timer?.cancel();
+    final int myToken = _sessionToken;
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!mounted || gameOver || !gameStarted) {
+      if (!mounted || myToken != _sessionToken) {
         timer.cancel();
+        return;
+      }
+
+      if (gameOver || !gameStarted || isCountingDown) {
         return;
       }
 
@@ -306,9 +357,18 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   }
 
   Future<void> _endGame(String reason) async {
+    if (_isTransitioning || gameOver) return;
+
+    _isTransitioning = true;
+    _sessionToken++;
     _timer?.cancel();
 
     final bool isNewBest = score > highScore;
+
+    if (!mounted) {
+      _isTransitioning = false;
+      return;
+    }
 
     setState(() {
       gameOver = true;
@@ -322,7 +382,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     await _saveHighScoreIfNeeded();
     await _playGameOverFeedback();
 
-    if (!mounted) return;
+    if (!mounted) {
+      _isTransitioning = false;
+      return;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -380,7 +443,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                     decoration: BoxDecoration(
                       color: const Color(0xFFFFF6D6),
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: const Color(0xFFFFD60A), width: 2),
+                      border: Border.all(
+                        color: const Color(0xFFFFD60A),
+                        width: 2,
+                      ),
                     ),
                     child: const Text(
                       'New Best!',
@@ -458,15 +524,20 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
         );
       },
     );
+
+    _isTransitioning = false;
   }
 
   void _reshuffleBoard() {
+    if (!mounted) return;
     setState(() {
       numbers.shuffle(_random);
     });
   }
 
   void _showFeedback(FeedbackBubble bubble) {
+    if (!mounted) return;
+
     setState(() {
       feedbackBubble = bubble;
     });
@@ -482,7 +553,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   }
 
   Future<void> _handleTap(int value) async {
-    if (gameOver || !gameStarted || isCountingDown) return;
+    if (gameOver || !gameStarted || isCountingDown || _isTransitioning) return;
 
     if (value == nextExpected) {
       int pointsEarned = 1;
@@ -543,10 +614,12 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
             FeedbackBubble(
               title: 'Combo x$combo',
               subtitle: '+$pointsEarned points',
-              backgroundColor:
-                  combo >= 5 ? const Color(0xFFE0F7EC) : const Color(0xFFEAF4FF),
-              borderColor:
-                  combo >= 5 ? const Color(0xFF2DC653) : const Color(0xFF0077B6),
+              backgroundColor: combo >= 5
+                  ? const Color(0xFFE0F7EC)
+                  : const Color(0xFFEAF4FF),
+              borderColor: combo >= 5
+                  ? const Color(0xFF2DC653)
+                  : const Color(0xFF0077B6),
               textColor: const Color(0xFF1B263B),
             ),
           );
@@ -696,6 +769,8 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool disableStartButton = isCountingDown || _isTransitioning;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Tap Tide'),
@@ -852,7 +927,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: isCountingDown ? null : _beginCountdownAndStart,
+                  onPressed: disableStartButton ? null : _beginCountdownAndStart,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFFD60A),
                     foregroundColor: const Color(0xFF1B263B),
@@ -865,7 +940,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                   child: Text(
                     gameStarted
                         ? 'Restart Game'
-                        : isCountingDown
+                        : disableStartButton
                             ? 'Starting...'
                             : 'Start Game',
                     style: const TextStyle(
