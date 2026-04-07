@@ -271,7 +271,9 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   }
 
   Future<void> _beginCountdownAndStart() async {
+
     if (_isStartingGame) return;
+    if (gameStarted && !gameOver) return;
     if (!_canRestartNow()) return;
 
     _isStartingGame = true;
