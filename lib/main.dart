@@ -48,6 +48,8 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   static const String soundEnabledKey = 'tap_tide_sound_enabled';
   static const String hapticsEnabledKey = 'tap_tide_haptics_enabled';
 
+  static const Duration restartCooldown = Duration(milliseconds: 450);
+
   final Random _random = Random();
 
   late List<int> numbers;
@@ -67,8 +69,12 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   bool gameStarted = false;
   bool isCountingDown = false;
 
-  bool _isTransitioning = false;
-  int _sessionToken = 0;
+  bool _isStartingGame = false;
+  bool _isShowingGameOverSheet = false;
+  bool _isProcessingTap = false;
+
+  int _roundToken = 0;
+  DateTime? _lastRestartAt;
 
   String statusMessage = 'Tap start to begin';
   FeedbackBubble? feedbackBubble;
@@ -79,10 +85,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
 
   AudioPool? _tapCorrectPool;
   AudioPool? _countdownTickPool;
-  AudioPlayer? _comboPlayer;
-  AudioPlayer? _waveCompletePlayer;
-  AudioPlayer? _failPlayer;
-  AudioPlayer? _goPlayer;
+  AudioPool? _comboPool;
+  AudioPool? _waveCompletePool;
+  AudioPool? _failPool;
+  AudioPool? _goPool;
 
   @override
   void initState() {
@@ -97,10 +103,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     _timer?.cancel();
     _tapCorrectPool?.dispose();
     _countdownTickPool?.dispose();
-    _comboPlayer?.dispose();
-    _waveCompletePlayer?.dispose();
-    _failPlayer?.dispose();
-    _goPlayer?.dispose();
+    _comboPool?.dispose();
+    _waveCompletePool?.dispose();
+    _failPool?.dispose();
+    _goPool?.dispose();
     super.dispose();
   }
 
@@ -108,30 +114,39 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     try {
       _tapCorrectPool = await AudioPool.create(
         source: AssetSource('audio/sfx/tap_correct.wav'),
-        maxPlayers: 4,
+        maxPlayers: 6,
         playerMode: PlayerMode.lowLatency,
       );
 
       _countdownTickPool = await AudioPool.create(
         source: AssetSource('audio/sfx/countdown_tick.wav'),
+        maxPlayers: 3,
+        playerMode: PlayerMode.lowLatency,
+      );
+
+      _comboPool = await AudioPool.create(
+        source: AssetSource('audio/sfx/combo.wav'),
+        maxPlayers: 4,
+        playerMode: PlayerMode.lowLatency,
+      );
+
+      _waveCompletePool = await AudioPool.create(
+        source: AssetSource('audio/sfx/wave_complete.wav'),
+        maxPlayers: 3,
+        playerMode: PlayerMode.lowLatency,
+      );
+
+      _failPool = await AudioPool.create(
+        source: AssetSource('audio/sfx/fail.wav'),
         maxPlayers: 2,
         playerMode: PlayerMode.lowLatency,
       );
 
-      _comboPlayer = AudioPlayer(playerId: 'combo_player');
-      _waveCompletePlayer = AudioPlayer(playerId: 'wave_complete_player');
-      _failPlayer = AudioPlayer(playerId: 'fail_player');
-      _goPlayer = AudioPlayer(playerId: 'go_player');
-
-      await _comboPlayer!.setReleaseMode(ReleaseMode.stop);
-      await _waveCompletePlayer!.setReleaseMode(ReleaseMode.stop);
-      await _failPlayer!.setReleaseMode(ReleaseMode.stop);
-      await _goPlayer!.setReleaseMode(ReleaseMode.stop);
-
-      await _comboPlayer!.setVolume(0.85);
-      await _waveCompletePlayer!.setVolume(0.95);
-      await _failPlayer!.setVolume(0.80);
-      await _goPlayer!.setVolume(0.95);
+      _goPool = await AudioPool.create(
+        source: AssetSource('audio/sfx/go.wav'),
+        maxPlayers: 3,
+        playerMode: PlayerMode.lowLatency,
+      );
 
       _audioReady = true;
     } catch (_) {
@@ -154,117 +169,120 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(soundEnabledKey, value);
     if (!mounted) return;
-
-    setState(() {
-      soundEnabled = value;
-    });
+    setState(() => soundEnabled = value);
   }
 
   Future<void> _setHapticsEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(hapticsEnabledKey, value);
     if (!mounted) return;
-
-    setState(() {
-      hapticsEnabled = value;
-    });
+    setState(() => hapticsEnabled = value);
   }
 
   Future<void> _saveHighScoreIfNeeded() async {
     if (score <= highScore) return;
-
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(highScoreKey, score);
-
     if (!mounted) return;
-    setState(() {
-      highScore = score;
-    });
+    setState(() => highScore = score);
   }
 
-  Future<void> _playTapCorrectSound() async {
+  bool _canRestartNow() {
+    final now = DateTime.now();
+    if (_lastRestartAt == null) {
+      _lastRestartAt = now;
+      return true;
+    }
+
+    if (now.difference(_lastRestartAt!) < restartCooldown) {
+      return false;
+    }
+
+    _lastRestartAt = now;
+    return true;
+  }
+
+  Future<void> _stopAllAudio() async {
+    try {
+      // Pools don't expose a hard global stop, but calling clear-ish reset logic
+      // via round invalidation and not queuing more sounds is enough for our case.
+      // This function exists for symmetry and future expansion.
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  void _playTapCorrectSound() {
     if (!soundEnabled || !_audioReady || _tapCorrectPool == null) return;
-    await _tapCorrectPool!.start(volume: 0.72);
+    unawaited(_tapCorrectPool!.start(volume: 0.72));
   }
 
-  Future<void> _playCountdownTickSound() async {
+  void _playCountdownTickSound() {
     if (!soundEnabled || !_audioReady || _countdownTickPool == null) return;
-    await _countdownTickPool!.start(volume: 0.78);
+    unawaited(_countdownTickPool!.start(volume: 0.78));
   }
 
-  Future<void> _playComboSound() async {
-    if (!soundEnabled || !_audioReady || _comboPlayer == null) return;
-    await _comboPlayer!.stop();
-    await _comboPlayer!.play(
-      AssetSource('audio/sfx/combo.wav'),
-      volume: 0.88,
-    );
+  void _playComboSound() {
+    if (!soundEnabled || !_audioReady || _comboPool == null) return;
+    unawaited(_comboPool!.start(volume: 0.88));
   }
 
-  Future<void> _playWaveCompleteSound() async {
-    if (!soundEnabled || !_audioReady || _waveCompletePlayer == null) return;
-    await _waveCompletePlayer!.stop();
-    await _waveCompletePlayer!.play(
-      AssetSource('audio/sfx/wave_complete.wav'),
-      volume: 0.95,
-    );
+  void _playWaveCompleteSound() {
+    if (!soundEnabled || !_audioReady || _waveCompletePool == null) return;
+    unawaited(_waveCompletePool!.start(volume: 0.95));
   }
 
-  Future<void> _playFailSound() async {
-    if (!soundEnabled || !_audioReady || _failPlayer == null) return;
-    await _failPlayer!.stop();
-    await _failPlayer!.play(
-      AssetSource('audio/sfx/fail.wav'),
-      volume: 0.80,
-    );
+  void _playFailSound() {
+    if (!soundEnabled || !_audioReady || _failPool == null) return;
+    unawaited(_failPool!.start(volume: 0.80));
   }
 
-  Future<void> _playGoSound() async {
-    if (!soundEnabled || !_audioReady || _goPlayer == null) return;
-    await _goPlayer!.stop();
-    await _goPlayer!.play(
-      AssetSource('audio/sfx/go.wav'),
-      volume: 0.95,
-    );
+  void _playGoSound() {
+    if (!soundEnabled || !_audioReady || _goPool == null) return;
+    unawaited(_goPool!.start(volume: 0.95));
   }
 
-  Future<void> _playCorrectFeedback() async {
-    await _playTapCorrectSound();
+  void _playCorrectFeedback() {
+    _playTapCorrectSound();
     if (hapticsEnabled) {
-      await HapticFeedback.selectionClick();
+      unawaited(HapticFeedback.selectionClick());
     }
   }
 
-  Future<void> _playComboFeedback() async {
-    await _playComboSound();
+  void _playComboFeedback() {
+    _playComboSound();
     if (hapticsEnabled) {
-      await HapticFeedback.lightImpact();
+      unawaited(HapticFeedback.lightImpact());
     }
   }
 
-  Future<void> _playWaveCompleteFeedback() async {
-    await _playWaveCompleteSound();
+  void _playWaveCompleteFeedback() {
+    _playWaveCompleteSound();
     if (hapticsEnabled) {
-      await HapticFeedback.mediumImpact();
+      unawaited(HapticFeedback.mediumImpact());
     }
   }
 
-  Future<void> _playGameOverFeedback() async {
-    await _playFailSound();
+  void _playGameOverFeedback() {
+    _playFailSound();
     if (hapticsEnabled) {
-      await HapticFeedback.heavyImpact();
+      unawaited(HapticFeedback.heavyImpact());
     }
   }
 
   Future<void> _beginCountdownAndStart() async {
-    if (_isTransitioning) return;
+    if (_isStartingGame) return;
+    if (!_canRestartNow()) return;
 
-    _isTransitioning = true;
-    final int myToken = ++_sessionToken;
+    _isStartingGame = true;
+    _isProcessingTap = false;
     _timer?.cancel();
+    await _stopAllAudio();
+
+    final int myRound = ++_roundToken;
 
     if (!mounted) {
-      _isTransitioning = false;
+      _isStartingGame = false;
       return;
     }
 
@@ -285,21 +303,18 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     });
 
     for (int i = 3; i >= 1; i--) {
-      if (!mounted || myToken != _sessionToken) {
-        _isTransitioning = false;
+      if (!mounted || myRound != _roundToken) {
+        _isStartingGame = false;
         return;
       }
 
-      setState(() {
-        countdownValue = i;
-      });
-
-      await _playCountdownTickSound();
+      setState(() => countdownValue = i);
+      _playCountdownTickSound();
       await Future.delayed(const Duration(seconds: 1));
     }
 
-    if (!mounted || myToken != _sessionToken) {
-      _isTransitioning = false;
+    if (!mounted || myRound != _roundToken) {
+      _isStartingGame = false;
       return;
     }
 
@@ -321,22 +336,20 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
       ),
     );
 
-    await _playGoSound();
-
+    _playGoSound();
     if (hapticsEnabled) {
-      await HapticFeedback.mediumImpact();
+      unawaited(HapticFeedback.mediumImpact());
     }
 
-    _startTimer();
-    _isTransitioning = false;
+    _startTimer(myRound);
+    _isStartingGame = false;
   }
 
-  void _startTimer() {
+  void _startTimer(int myRound) {
     _timer?.cancel();
-    final int myToken = _sessionToken;
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!mounted || myToken != _sessionToken) {
+      if (!mounted || myRound != _roundToken) {
         timer.cancel();
         return;
       }
@@ -357,16 +370,17 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   }
 
   Future<void> _endGame(String reason) async {
-    if (_isTransitioning || gameOver) return;
+    if (_isShowingGameOverSheet || gameOver) return;
 
-    _isTransitioning = true;
-    _sessionToken++;
+    _isShowingGameOverSheet = true;
+    _isProcessingTap = false;
     _timer?.cancel();
+    _roundToken++;
 
     final bool isNewBest = score > highScore;
 
     if (!mounted) {
-      _isTransitioning = false;
+      _isShowingGameOverSheet = false;
       return;
     }
 
@@ -380,14 +394,14 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     });
 
     await _saveHighScoreIfNeeded();
-    await _playGameOverFeedback();
+    _playGameOverFeedback();
 
     if (!mounted) {
-      _isTransitioning = false;
+      _isShowingGameOverSheet = false;
       return;
     }
 
-    await showModalBottomSheet<void>(
+    final bool? playAgain = await showModalBottomSheet<bool>(
       context: context,
       isDismissible: false,
       enableDrag: false,
@@ -500,10 +514,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _beginCountdownAndStart();
-                    },
+                    onPressed: () => Navigator.of(context).pop(true),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF0077B6),
                       foregroundColor: Colors.white,
@@ -525,43 +536,74 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
       },
     );
 
-    _isTransitioning = false;
+    _isShowingGameOverSheet = false;
+
+    if (playAgain == true && mounted) {
+      await _beginCountdownAndStart();
+    }
   }
 
   void _reshuffleBoard() {
     if (!mounted) return;
-    setState(() {
-      numbers.shuffle(_random);
-    });
+    setState(() => numbers.shuffle(_random));
   }
 
   void _showFeedback(FeedbackBubble bubble) {
     if (!mounted) return;
 
-    setState(() {
-      feedbackBubble = bubble;
-    });
+    setState(() => feedbackBubble = bubble);
 
     Future.delayed(const Duration(milliseconds: 1100), () {
       if (!mounted) return;
       if (feedbackBubble == bubble) {
-        setState(() {
-          feedbackBubble = null;
-        });
+        setState(() => feedbackBubble = null);
       }
     });
   }
 
   Future<void> _handleTap(int value) async {
-    if (gameOver || !gameStarted || isCountingDown || _isTransitioning) return;
+    if (gameOver ||
+        !gameStarted ||
+        isCountingDown ||
+        _isStartingGame ||
+        _isShowingGameOverSheet ||
+        _isProcessingTap) {
+      return;
+    }
 
-    if (value == nextExpected) {
+    _isProcessingTap = true;
+    final int myRound = _roundToken;
+
+    try {
+      if (value != nextExpected) {
+        if (!mounted || myRound != _roundToken) return;
+
+        setState(() {
+          combo = 0;
+        });
+
+        _showFeedback(
+          const FeedbackBubble(
+            title: 'Combo Lost',
+            subtitle: 'Wrong tile',
+            backgroundColor: Color(0xFFFFE4E4),
+            borderColor: Color(0xFFE53935),
+            textColor: Color(0xFF5C1A1A),
+          ),
+        );
+
+        await _endGame('Wrong tile!');
+        return;
+      }
+
       int pointsEarned = 1;
       final int updatedCombo = combo + 1;
 
       if (updatedCombo >= 3) {
         pointsEarned += updatedCombo ~/ 3;
       }
+
+      if (!mounted || myRound != _roundToken) return;
 
       setState(() {
         combo = updatedCombo;
@@ -572,12 +614,14 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
       });
 
       if (combo >= 3) {
-        await _playComboFeedback();
+        _playComboFeedback();
       } else {
-        await _playCorrectFeedback();
+        _playCorrectFeedback();
       }
 
       if (nextExpected == boardSize) {
+        if (!mounted || myRound != _roundToken) return;
+
         setState(() {
           wavesCleared++;
           statusMessage = 'Wave complete!';
@@ -602,8 +646,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
           ),
         );
 
-        await _playWaveCompleteFeedback();
+        _playWaveCompleteFeedback();
       } else {
+        if (!mounted || myRound != _roundToken) return;
+
         setState(() {
           nextExpected++;
           statusMessage = 'Nice! Tap $nextExpected';
@@ -637,22 +683,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
 
         _reshuffleBoard();
       }
-    } else {
-      setState(() {
-        combo = 0;
-      });
-
-      _showFeedback(
-        const FeedbackBubble(
-          title: 'Combo Lost',
-          subtitle: 'Wrong tile',
-          backgroundColor: Color(0xFFFFE4E4),
-          borderColor: Color(0xFFE53935),
-          textColor: Color(0xFF5C1A1A),
-        ),
-      );
-
-      await _endGame('Wrong tile!');
+    } finally {
+      if (myRound == _roundToken) {
+        _isProcessingTap = false;
+      }
     }
   }
 
@@ -727,15 +761,12 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     if (!gameStarted && !isCountingDown) {
       return const Color(0xFF0077B6);
     }
-
     if (value < nextExpected && gameStarted) {
       return const Color(0xFF2DC653);
     }
-
     if (value == nextExpected && gameStarted) {
       return const Color(0xFFFF6B35);
     }
-
     return const Color(0xFF0077B6);
   }
 
@@ -769,7 +800,8 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final bool disableStartButton = isCountingDown || _isTransitioning;
+    final bool disableStartButton =
+        isCountingDown || _isStartingGame || _isShowingGameOverSheet;
 
     return Scaffold(
       appBar: AppBar(
@@ -927,7 +959,11 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: disableStartButton ? null : _beginCountdownAndStart,
+                  onPressed: disableStartButton
+                      ? null
+                      : () {
+                          _beginCountdownAndStart();
+                        },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFFFD60A),
                     foregroundColor: const Color(0xFF1B263B),
