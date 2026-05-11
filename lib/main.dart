@@ -68,6 +68,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   bool gameOver = false;
   bool gameStarted = false;
   bool isCountingDown = false;
+  bool isPaused = false;
 
   bool _isStartingGame = false;
   bool _isShowingGameOverSheet = false;
@@ -338,6 +339,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
         gameOver = false;
         gameStarted = false;
         isCountingDown = true;
+        isPaused = false;
         statusMessage = 'Get ready';
         feedbackBubble = null;
         countdownValue = 3;
@@ -393,7 +395,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
         return;
       }
 
-      if (gameOver || !gameStarted || isCountingDown) {
+      if (gameOver || !gameStarted || isCountingDown || isPaused) {
         return;
       }
 
@@ -612,6 +614,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     if (gameOver ||
         !gameStarted ||
         isCountingDown ||
+        isPaused ||
         _isStartingGame ||
         _isShowingGameOverSheet ||
         _isProcessingTap) {
@@ -737,6 +740,29 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     }
   }
 
+  void _togglePause() {
+    if (!gameStarted || gameOver || isCountingDown) return;
+
+    setState(() {
+      isPaused = !isPaused;
+      statusMessage = isPaused
+          ? 'Game paused'
+          : 'Back in the wave! Tap $nextExpected';
+    });
+
+    if (!isPaused) {
+      _showFeedback(
+        const FeedbackBubble(
+          title: 'Resume!',
+          subtitle: 'Catch the rhythm',
+          backgroundColor: Color(0xFFEAF4FF),
+          borderColor: Color(0xFF0077B6),
+          textColor: Color(0xFF1B263B),
+        ),
+      );
+    }
+  }
+
   void _openSettings() {
     showModalBottomSheet<void>(
       context: context,
@@ -855,6 +881,12 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
         backgroundColor: const Color(0xFF0077B6),
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            onPressed: _togglePause,
+            icon: Icon(
+              isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+            ),
+          ),
           IconButton(
             onPressed: _openSettings,
             icon: const Icon(Icons.settings_rounded),
@@ -997,6 +1029,57 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                           ),
                         ),
                       ),
+                    if (isPaused)
+                      Container(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 28,
+                              vertical: 22,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(24),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black12,
+                                  blurRadius: 16,
+                                  offset: Offset(0, 6),
+                                ),
+                              ],
+                            ),
+                            child: const Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.pause_circle_filled_rounded,
+                                  size: 64,
+                                  color: Color(0xFF0077B6),
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  'Paused',
+                                  style: TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF1B263B),
+                                  ),
+                                ),
+                                SizedBox(height: 6),
+                                Text(
+                                  'Tap pause again to continue',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -1019,7 +1102,9 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                     ),
                   ),
                   child: Text(
-                    gameStarted
+                    isPaused
+                        ? 'Game Paused'
+                        : gameStarted
                         ? 'Restart Game'
                         : disableStartButton
                         ? 'Starting...'
@@ -1102,6 +1187,7 @@ class _TopPanel extends StatelessWidget {
                 value: gameStarted ? '$nextExpected' : '-',
               ),
               _InfoChip(label: 'Time', value: '${timeLeft}s'),
+              _InfoChip(label: 'Wave', value: '$wavesCleared'),
               _InfoChip(
                 label: 'Combo',
                 value: '$combo',
