@@ -81,6 +81,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   int? countdownValue;
 
   Timer? _timer;
+  Timer? _feedbackTimer;
   bool _audioReady = false;
 
   AudioPool? _tapCorrectPool;
@@ -102,6 +103,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _feedbackTimer?.cancel();
     unawaited(_stopAllAudio());
     unawaited(_tapCorrectPool?.dispose());
     unawaited(_countdownTickPool?.dispose());
@@ -308,81 +310,78 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     }
   }
 
-  Future<void> _beginCountdownAndStart() async {
+  Future<void> _beginCountdownAndStart({bool bypassCooldown = false}) async {
     if (_isStartingGame) return;
-    if (gameStarted && !gameOver) return;
-    if (!_canRestartNow()) return;
+    if (!bypassCooldown && !_canRestartNow()) return;
 
     _isStartingGame = true;
     _isProcessingTap = false;
-    _timer?.cancel();
-    await _stopAllAudio();
+    int? myRound;
 
-    final int myRound = ++_roundToken;
+    try {
+      _timer?.cancel();
+      await _stopAllAudio();
 
-    if (!mounted) {
-      _isStartingGame = false;
-      return;
-    }
+      myRound = ++_roundToken;
 
-    setState(() {
-      numbers = List.generate(boardSize, (index) => index + 1)
-        ..shuffle(_random);
-      nextExpected = 1;
-      score = 0;
-      combo = 0;
-      bestCombo = 0;
-      wavesCleared = 0;
-      timeLeft = roundTimeSeconds;
-      gameOver = false;
-      gameStarted = false;
-      isCountingDown = true;
-      statusMessage = 'Get ready';
-      feedbackBubble = null;
-      countdownValue = 3;
-    });
+      if (!mounted) return;
 
-    for (int i = 3; i >= 1; i--) {
-      if (!mounted || myRound != _roundToken) {
-        _isStartingGame = false;
-        return;
+      setState(() {
+        numbers = List.generate(boardSize, (index) => index + 1)
+          ..shuffle(_random);
+        nextExpected = 1;
+        score = 0;
+        combo = 0;
+        bestCombo = 0;
+        wavesCleared = 0;
+        timeLeft = roundTimeSeconds;
+        gameOver = false;
+        gameStarted = false;
+        isCountingDown = true;
+        statusMessage = 'Get ready';
+        feedbackBubble = null;
+        countdownValue = 3;
+      });
+
+      for (int i = 3; i >= 1; i--) {
+        if (!mounted || myRound != _roundToken) return;
+
+        setState(() => countdownValue = i);
+        _playCountdownTickSound();
+        await Future.delayed(const Duration(seconds: 1));
       }
 
-      setState(() => countdownValue = i);
-      _playCountdownTickSound();
-      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted || myRound != _roundToken) return;
+
+      setState(() {
+        countdownValue = null;
+        isCountingDown = false;
+        gameStarted = true;
+        gameOver = false;
+        statusMessage = 'Go! Tap 1';
+      });
+
+      _showFeedback(
+        const FeedbackBubble(
+          title: 'GO!',
+          subtitle: 'Catch the wave',
+          backgroundColor: Color(0xFFE0F7EC),
+          borderColor: Color(0xFF2DC653),
+          textColor: Color(0xFF123524),
+        ),
+      );
+
+      _playGoSound();
+      if (hapticsEnabled) {
+        unawaited(HapticFeedback.mediumImpact());
+      }
+
+      _startTimer(myRound);
+    } finally {
+      if (mounted && (myRound == null || myRound == _roundToken)) {
+        _isStartingGame = false;
+      }
     }
-
-    if (!mounted || myRound != _roundToken) {
-      _isStartingGame = false;
-      return;
-    }
-
-    setState(() {
-      countdownValue = null;
-      isCountingDown = false;
-      gameStarted = true;
-      gameOver = false;
-      statusMessage = 'Go! Tap 1';
-    });
-
-    _showFeedback(
-      const FeedbackBubble(
-        title: 'GO!',
-        subtitle: 'Catch the wave',
-        backgroundColor: Color(0xFFE0F7EC),
-        borderColor: Color(0xFF2DC653),
-        textColor: Color(0xFF123524),
-      ),
-    );
-
-    _playGoSound();
-    if (hapticsEnabled) {
-      unawaited(HapticFeedback.mediumImpact());
-    }
-
-    _startTimer(myRound);
-    _isStartingGame = false;
   }
 
   void _startTimer(int myRound) {
@@ -576,10 +575,17 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
       },
     );
 
-    _isShowingGameOverSheet = false;
+    if (!mounted) {
+      _isShowingGameOverSheet = false;
+      return;
+    }
 
-    if (playAgain == true && mounted) {
-      await _beginCountdownAndStart();
+    setState(() {
+      _isShowingGameOverSheet = false;
+    });
+
+    if (playAgain == true) {
+      await _beginCountdownAndStart(bypassCooldown: true);
     }
   }
 
@@ -591,9 +597,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   void _showFeedback(FeedbackBubble bubble) {
     if (!mounted) return;
 
+    _feedbackTimer?.cancel();
     setState(() => feedbackBubble = bubble);
 
-    Future.delayed(const Duration(milliseconds: 1100), () {
+    _feedbackTimer = Timer(const Duration(milliseconds: 1100), () {
       if (!mounted) return;
       if (feedbackBubble == bubble) {
         setState(() => feedbackBubble = null);
