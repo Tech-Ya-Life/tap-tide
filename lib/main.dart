@@ -89,6 +89,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   AudioPool? _waveCompletePool;
   AudioPool? _failPool;
   AudioPool? _goPool;
+  final Set<StopFunction> _activeSoundStops = <StopFunction>{};
 
   @override
   void initState() {
@@ -101,12 +102,13 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   @override
   void dispose() {
     _timer?.cancel();
-    _tapCorrectPool?.dispose();
-    _countdownTickPool?.dispose();
-    _comboPool?.dispose();
-    _waveCompletePool?.dispose();
-    _failPool?.dispose();
-    _goPool?.dispose();
+    unawaited(_stopAllAudio());
+    unawaited(_tapCorrectPool?.dispose());
+    unawaited(_countdownTickPool?.dispose());
+    unawaited(_comboPool?.dispose());
+    unawaited(_waveCompletePool?.dispose());
+    unawaited(_failPool?.dispose());
+    unawaited(_goPool?.dispose());
     super.dispose();
   }
 
@@ -203,43 +205,79 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   }
 
   Future<void> _stopAllAudio() async {
-    try {
-      // Pools don't expose a hard global stop, but calling clear-ish reset logic
-      // via round invalidation and not queuing more sounds is enough for our case.
-      // This function exists for symmetry and future expansion.
-    } catch (_) {
-      // ignore
-    }
+    final stops = List<StopFunction>.of(_activeSoundStops);
+    _activeSoundStops.clear();
+
+    await Future.wait<void>(
+      stops.map((stop) async {
+        try {
+          await stop();
+        } catch (_) {
+          // Audio cleanup should never block gameplay recovery.
+        }
+      }),
+    );
+  }
+
+  void _playPooledSound(
+    AudioPool? pool, {
+    required double volume,
+    Duration cleanupAfter = const Duration(milliseconds: 900),
+  }) {
+    if (!soundEnabled || !_audioReady || pool == null) return;
+
+    unawaited(() async {
+      StopFunction? stop;
+
+      try {
+        stop = await pool.start(volume: volume);
+        _activeSoundStops.add(stop);
+      } catch (_) {
+        return;
+      }
+
+      await Future.delayed(cleanupAfter);
+
+      if (!_activeSoundStops.remove(stop)) return;
+
+      try {
+        await stop();
+      } catch (_) {
+        // Best-effort cleanup only.
+      }
+    }());
   }
 
   void _playTapCorrectSound() {
-    if (!soundEnabled || !_audioReady || _tapCorrectPool == null) return;
-    unawaited(_tapCorrectPool!.start(volume: 0.72));
+    _playPooledSound(_tapCorrectPool, volume: 0.72);
   }
 
   void _playCountdownTickSound() {
-    if (!soundEnabled || !_audioReady || _countdownTickPool == null) return;
-    unawaited(_countdownTickPool!.start(volume: 0.78));
+    _playPooledSound(
+      _countdownTickPool,
+      volume: 0.78,
+      cleanupAfter: const Duration(milliseconds: 700),
+    );
   }
 
   void _playComboSound() {
-    if (!soundEnabled || !_audioReady || _comboPool == null) return;
-    unawaited(_comboPool!.start(volume: 0.88));
+    _playPooledSound(_comboPool, volume: 0.88);
   }
 
   void _playWaveCompleteSound() {
-    if (!soundEnabled || !_audioReady || _waveCompletePool == null) return;
-    unawaited(_waveCompletePool!.start(volume: 0.95));
+    _playPooledSound(
+      _waveCompletePool,
+      volume: 0.95,
+      cleanupAfter: const Duration(milliseconds: 1200),
+    );
   }
 
   void _playFailSound() {
-    if (!soundEnabled || !_audioReady || _failPool == null) return;
-    unawaited(_failPool!.start(volume: 0.80));
+    _playPooledSound(_failPool, volume: 0.80);
   }
 
   void _playGoSound() {
-    if (!soundEnabled || !_audioReady || _goPool == null) return;
-    unawaited(_goPool!.start(volume: 0.95));
+    _playPooledSound(_goPool, volume: 0.95);
   }
 
   void _playCorrectFeedback() {
@@ -271,7 +309,6 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
   }
 
   Future<void> _beginCountdownAndStart() async {
-
     if (_isStartingGame) return;
     if (gameStarted && !gameOver) return;
     if (!_canRestartNow()) return;
@@ -289,7 +326,8 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     }
 
     setState(() {
-      numbers = List.generate(boardSize, (index) => index + 1)..shuffle(_random);
+      numbers = List.generate(boardSize, (index) => index + 1)
+        ..shuffle(_random);
       nextExpected = 1;
       score = 0;
       combo = 0;
@@ -745,7 +783,9 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                         'Vibration / Haptics',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      subtitle: const Text('Touch feedback for taps and misses'),
+                      subtitle: const Text(
+                        'Touch feedback for taps and misses',
+                      ),
                       value: hapticsEnabled,
                       onChanged: updateHaptics,
                     ),
@@ -792,11 +832,7 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
     }
 
     return const [
-      BoxShadow(
-        color: Colors.black12,
-        blurRadius: 8,
-        offset: Offset(0, 4),
-      ),
+      BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
     ];
   }
 
@@ -881,10 +917,10 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                       physics: const NeverScrollableScrollPhysics(),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                      ),
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 12,
+                            mainAxisSpacing: 12,
+                          ),
                       itemBuilder: (context, index) {
                         final value = numbers[index];
                         final isTapped = gameStarted && value < nextExpected;
@@ -979,8 +1015,8 @@ class _TapTideHomePageState extends State<TapTideHomePage> {
                     gameStarted
                         ? 'Restart Game'
                         : disableStartButton
-                            ? 'Starting...'
-                            : 'Start Game',
+                        ? 'Starting...'
+                        : 'Start Game',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
@@ -1212,10 +1248,7 @@ class FeedbackBubble {
 class _FeedbackBubbleWidget extends StatelessWidget {
   final FeedbackBubble bubble;
 
-  const _FeedbackBubbleWidget({
-    super.key,
-    required this.bubble,
-  });
+  const _FeedbackBubbleWidget({super.key, required this.bubble});
 
   @override
   Widget build(BuildContext context) {
